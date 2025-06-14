@@ -1,293 +1,505 @@
-# forensic_analyzer.py — YARA rules intégrées
-import subprocess
-import json
-import os
-import requests
-from pathlib import Path
-import magic
-import hashlib
-import datetime
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
 
-API_ENDPOINT = 'http://127.0.0.1:5000/api/v1/report/upload_json/'
-TIMEOUT = 30
-SAMPLE_DIR = '/samples'
-YARA_INLINE_PATH = '/tmp/yara_inline_rules.yar'
-
-YARA_INLINE_RULES = """
-rule Suspicious_Executable {
-    meta:
-        description = "Détecte les fichiers exécutables suspects"
-        severity = "HIGH"
-    strings:
-        $mz = "MZ"
-        $pe = "PE"
-        $exe = ".exe"
-    condition:
-        $mz at 0 and $pe and $exe
-}
-
-rule Malicious_Shellcode {
-    meta:
-        description = "Détecte les shellcodes malveillants"
-        severity = "HIGH"
-    strings:
-        $shellcode1 = { 90 90 90 90 90 90 90 90 }
-        $shellcode2 = { 68 ?? ?? ?? ?? C3 }
-    condition:
-        any of them
-}
-
-rule Suspicious_Strings {
-    meta:
-        description = "Détecte les chaînes de caractères suspectes"
-        severity = "MEDIUM"
-    strings:
-        $cmd = "cmd.exe" nocase
-        $powershell = "powershell" nocase
-        $wget = "wget" nocase
-        $curl = "curl" nocase
-        $download = "download" nocase
-    condition:
-        2 of them
-}
-
-rule Suspicious_IP_Address {
-    meta:
-        description = "Détecte les adresses IP suspectes"
-        severity = "MEDIUM"
-    strings:
-        $ip = /[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}/
-    condition:
-        $ip
-}
-
-rule Suspicious_Process {
-    meta:
-        description = "Détecte les noms de processus suspects"
-        severity = "HIGH"
-    strings:
-        $p1 = "svchost.exe" nocase
-        $p2 = "explorer.exe" nocase
-        $p3 = "system32" nocase
-    condition:
-        any of them
-}
-
-rule Suspicious_Registry {
-    meta:
-        description = "Détecte les modifications de registre suspectes"
-        severity = "HIGH"
-    strings:
-        $r1 = "HKEY_LOCAL_MACHINE" nocase
-        $r2 = "HKEY_CURRENT_USER" nocase
-        $r3 = "RunOnce" nocase
-    condition:
-        all of them
-}
-
-rule Suspicious_Network {
-    meta:
-        description = "Détecte les activités réseau suspectes"
-        severity = "MEDIUM"
-    strings:
-        $n1 = "http://" nocase
-        $n2 = "https://" nocase
-        $n3 = "ftp://" nocase
-    condition:
-        2 of them
-}
-
-rule Suspicious_File_Operations {
-    meta:
-        description = "Détecte les opérations de fichiers suspectes"
-        severity = "MEDIUM"
-    strings:
-        $f1 = "copy" nocase
-        $f2 = "move" nocase
-        $f3 = "delete" nocase
-    condition:
-        2 of them
-}
-
-rule Suspicious_System_Commands {
-    meta:
-        description = "Détecte les commandes système suspectes"
-        severity = "HIGH"
-    strings:
-        $c1 = "net user" nocase
-        $c2 = "net group" nocase
-        $c3 = "net localgroup" nocase
-    condition:
-        any of them
-}
-
-rule Suspicious_Encryption {
-    meta:
-        description = "Détecte les opérations de chiffrement suspectes"
-        severity = "HIGH"
-    strings:
-        $e1 = "AES" nocase
-        $e2 = "RSA" nocase
-        $e3 = "encrypt" nocase
-    condition:
-        2 of them
-}
+"""
+Forensic Analyzer - Outil d'analyse forensique autonome
+Analyse les fichiers, la mémoire et les systèmes sans dépendances externes
 """
 
-SYSTEM_COMMANDS = {
-    'whoami': ['whoami'],
-    'hostname': ['hostname'],
-    'ip': ['ip', 'a'],
-    'netstat': ['netstat', '-tunlp'],
-    'ps': ['ps', 'aux'],
-    'df': ['df', '-h'],
-    'lsblk': ['lsblk'],
-    'lsmod': ['lsmod'],
-    'uptime': ['uptime']
+import os
+import sys
+import json
+import time
+import hashlib
+import platform
+import subprocess
+import datetime
+import socket
+import struct
+import binascii
+import logging
+import argparse
+import re
+import base64
+from pathlib import Path
+from typing import Dict, List, Any, Optional, Union
+from urllib import request
+from urllib.error import URLError
+
+# Configuration
+API_CONFIG = {
+    'endpoint': 'http://127.0.0.1:5000/api/v1/report/upload_json/',
+    'timeout': 30,
+    'max_retries': 3
 }
 
-def write_inline_yara():
-    with open(YARA_INLINE_PATH, 'w') as f:
-        f.write(YARA_INLINE_RULES)
+# Configuration des chemins
+PATHS = {
+    'input': './input',
+    'output': './output',
+    'logs': './logs',
+    'rules': './rules'
+}
 
-def run_command(name, cmd):
-    try:
-        result = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
-        return {
-            'command': name,
-            'stdout': result.stdout,
-            'stderr': result.stderr,
-            'returncode': result.returncode
+# Configuration du logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.FileHandler('forensic_analysis.log'),
+        logging.StreamHandler()
+    ]
+)
+logger = logging.getLogger(__name__)
+
+class ForensicAnalyzer:
+    def __init__(self, target_path):
+        self.target_path = target_path
+        self.setup_environment()
+        self.report = {
+            "timestamp": datetime.datetime.now().isoformat(),
+            "target": target_path,
+            "analysis": {
+                "basic_info": {},
+                "static_analysis": {},
+                "dynamic_analysis": {},
+                "threats": {},
+                "recommendations": []
+            }
         }
-    except Exception as e:
-        return {'command': name, 'error': str(e)}
 
-def collect_system_info():
-    return [run_command(name, cmd) for name, cmd in SYSTEM_COMMANDS.items()]
+    def setup_environment(self):
+        """Configure l'environnement d'analyse"""
+        try:
+            # Création des répertoires
+            for path in PATHS.values():
+                os.makedirs(path, exist_ok=True)
+            
+            logger.info("Environnement configuré avec succès")
+        except Exception as e:
+            logger.error(f"Erreur lors de la configuration: {str(e)}")
+            raise
 
-def get_boot_info():
-    return [run_command(name, cmd) for name, cmd in {
-        'last_boot': ['who', '-b'],
-        'journalctl_boot': ['journalctl', '-b', '--no-pager', '--lines=50'],
-        'boot_log': ['dmesg', '--ctime', '--level=err,warn']
-    }.items()]
+    def analyze_file(self):
+        """Analyse un fichier"""
+        try:
+            # Analyse de base
+            self.analyze_basic_info()
+            
+            # Analyse statique
+            self.analyze_static()
+            
+            # Analyse dynamique
+            self.analyze_dynamic()
+            
+            # Détection des menaces
+            self.detect_threats()
+            
+            # Génération des recommandations
+            self.generate_recommendations()
+            
+            return self.report
+        except Exception as e:
+            logger.error(f"Erreur lors de l'analyse: {str(e)}")
+            raise
 
-def analyze_files(directory):
-    results = []
-    dir_path = Path(directory)
-    if not dir_path.exists():
-        return [{'error': f'{directory} not found'}]
-    for file in dir_path.glob('*'):
-        if file.is_file():
-            try:
-                results.append({
-                    'filename': file.name,
-                    'path': str(file.resolve()),
-                    'size': file.stat().st_size,
-                    'created': datetime.datetime.fromtimestamp(file.stat().st_ctime).isoformat(),
-                    'modified': datetime.datetime.fromtimestamp(file.stat().st_mtime).isoformat(),
-                    'mime': magic.from_file(str(file), mime=True),
-                    'hashes': {
-                        'md5': hashlib.md5(file.read_bytes()).hexdigest(),
-                        'sha256': hashlib.sha256(file.read_bytes()).hexdigest()
-                    }
-                })
-            except Exception as e:
-                results.append({'file': str(file), 'error': str(e)})
-    return results
+    def analyze_basic_info(self):
+        """Analyse les informations de base"""
+        try:
+            file_path = Path(self.target_path)
+            if not file_path.exists():
+                raise FileNotFoundError(f"Fichier non trouvé: {self.target_path}")
 
-def extract_strings(file_path):
-    try:
-        result = subprocess.run(['strings', file_path], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
-        return result.stdout.splitlines()
-    except Exception as e:
-        return [f'Error extracting strings: {e}']
+            # Détection du type MIME basique
+            mime_type = self.detect_mime_type(str(file_path))
 
-def run_yara_scan(directory):
-    results = []
-    for file in Path(directory).glob('*'):
-        if file.is_file():
-            try:
-                result = subprocess.run(['yara', YARA_INLINE_PATH, str(file)], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
-                results.append({
-                    'file': str(file),
-                    'matches': result.stdout.strip(),
-                    'errors': result.stderr.strip()
-                })
-            except Exception as e:
-                results.append({'file': str(file), 'error': str(e)})
-    return results
+            self.report["analysis"]["basic_info"] = {
+                "filename": file_path.name,
+                "size": file_path.stat().st_size,
+                "type": mime_type,
+                "md5": self.calculate_hash(str(file_path), "md5"),
+                "sha1": self.calculate_hash(str(file_path), "sha1"),
+                "sha256": self.calculate_hash(str(file_path), "sha256"),
+                "created": datetime.datetime.fromtimestamp(file_path.stat().st_ctime).isoformat(),
+                "modified": datetime.datetime.fromtimestamp(file_path.stat().st_mtime).isoformat()
+            }
+        except Exception as e:
+            logger.error(f"Erreur lors de l'analyse des informations de base: {str(e)}")
+            raise
 
-def run_clamav_scan(directory):
-    try:
-        result = subprocess.run(['clamscan', '-r', directory], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
-        return [{
-            'tool': 'clamav',
-            'output': result.stdout,
-            'error': result.stderr,
-            'returncode': result.returncode
-        }]
-    except Exception as e:
-        return [{'tool': 'clamav', 'error': str(e)}]
+    def detect_mime_type(self, file_path):
+        """Détecte le type MIME d'un fichier"""
+        try:
+            # Lecture des premiers octets du fichier
+            with open(file_path, 'rb') as f:
+                header = f.read(2048)
+            
+            # Signatures de fichiers courantes
+            signatures = {
+                b'PK\x03\x04': 'application/zip',
+                b'\x7fELF': 'application/x-executable',
+                b'MZ': 'application/x-dosexec',
+                b'%PDF': 'application/pdf',
+                b'\x89PNG': 'image/png',
+                b'\xff\xd8\xff': 'image/jpeg',
+                b'GIF87a': 'image/gif',
+                b'GIF89a': 'image/gif'
+            }
+            
+            for sig, mime in signatures.items():
+                if header.startswith(sig):
+                    return mime
+            
+            return 'application/octet-stream'
+        except Exception:
+            return 'application/octet-stream'
 
-def run_exiftool_scan(directory):
-    results = []
-    for file in Path(directory).glob('*'):
-        if file.is_file():
-            try:
-                result = subprocess.run(['exiftool', str(file)], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
-                results.append({
-                    'file': str(file),
-                    'metadata': result.stdout.strip()
-                })
-            except Exception as e:
-                results.append({'file': str(file), 'error': str(e)})
-    return results
+    def analyze_static(self):
+        """Analyse statique"""
+        try:
+            self.report["analysis"]["static_analysis"] = {
+                "strings": self.extract_strings(),
+                "entropy": self.calculate_entropy(),
+                "patterns": self.detect_patterns()
+            }
+        except Exception as e:
+            logger.error(f"Erreur lors de l'analyse statique: {str(e)}")
+            raise
 
-def run_binwalk_scan(directory):
-    results = []
-    for file in Path(directory).glob('*'):
-        if file.is_file():
-            try:
-                result = subprocess.run(['binwalk', str(file)], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
-                results.append({
-                    'file': str(file),
-                    'binwalk_output': result.stdout.strip()
-                })
-            except Exception as e:
-                results.append({'file': str(file), 'error': str(e)})
-    return results
+    def analyze_dynamic(self):
+        """Analyse dynamique"""
+        try:
+            self.report["analysis"]["dynamic_analysis"] = {
+                "system_info": self.get_system_info(),
+                "network_info": self.get_network_info(),
+                "file_operations": self.analyze_file_operations()
+            }
+        except Exception as e:
+            logger.error(f"Erreur lors de l'analyse dynamique: {str(e)}")
+            raise
 
-def save_report_json(report, path='forensic_report.json'):
-    with open(path, 'w') as f:
-        json.dump(report, f, indent=2)
-    return path
+    def calculate_entropy(self):
+        """Calcule l'entropie du fichier"""
+        try:
+            with open(self.target_path, 'rb') as f:
+                data = f.read()
+            
+            if not data:
+                return 0
+            
+            entropy = 0
+            for x in range(256):
+                p_x = data.count(bytes([x])) / len(data)
+                if p_x > 0:
+                    entropy += -p_x * math.log2(p_x)
+            
+            return entropy
+        except Exception as e:
+            logger.error(f"Erreur lors du calcul de l'entropie: {str(e)}")
+            return 0
 
-def upload_to_api(filepath):
-    try:
-        with open(filepath, 'r') as f:
-            response = requests.post(API_ENDPOINT, json=json.load(f), timeout=TIMEOUT)
-            print(f"Upload status: {response.status_code}, Response: {response.text}")
-    except Exception as e:
-        print(f"API upload failed: {e}")
+    def detect_patterns(self):
+        """Détecte les motifs suspects"""
+        patterns = {
+            'ip_addresses': self.find_ip_addresses(),
+            'urls': self.find_urls(),
+            'base64': self.find_base64(),
+            'hex_patterns': self.find_hex_patterns()
+        }
+        return patterns
+
+    def find_ip_addresses(self):
+        """Trouve les adresses IP"""
+        try:
+            with open(self.target_path, 'rb') as f:
+                content = f.read().decode('utf-8', errors='ignore')
+            
+            ip_pattern = r'\b(?:\d{1,3}\.){3}\d{1,3}\b'
+            return re.findall(ip_pattern, content)
+        except Exception:
+            return []
+
+    def find_urls(self):
+        """Trouve les URLs"""
+        try:
+            with open(self.target_path, 'rb') as f:
+                content = f.read().decode('utf-8', errors='ignore')
+            
+            url_pattern = r'https?://(?:[-\w.]|(?:%[\da-fA-F]{2}))+'
+            return re.findall(url_pattern, content)
+        except Exception:
+            return []
+
+    def find_base64(self):
+        """Trouve les chaînes en base64"""
+        try:
+            with open(self.target_path, 'rb') as f:
+                content = f.read().decode('utf-8', errors='ignore')
+            
+            base64_pattern = r'[A-Za-z0-9+/]{32,}={0,2}'
+            return re.findall(base64_pattern, content)
+        except Exception:
+            return []
+
+    def find_hex_patterns(self):
+        """Trouve les motifs hexadécimaux"""
+        try:
+            with open(self.target_path, 'rb') as f:
+                content = f.read()
+            
+            patterns = []
+            for i in range(len(content) - 8):
+                chunk = content[i:i+8]
+                if all(c in b'0123456789ABCDEFabcdef' for c in chunk):
+                    patterns.append(binascii.hexlify(chunk).decode())
+            
+            return patterns
+        except Exception:
+            return []
+
+    def get_system_info(self):
+        """Obtient les informations système"""
+        return {
+            'platform': platform.platform(),
+            'python_version': platform.python_version(),
+            'processor': platform.processor(),
+            'hostname': socket.gethostname(),
+            'ip_address': socket.gethostbyname(socket.gethostname())
+        }
+
+    def get_network_info(self):
+        """Obtient les informations réseau"""
+        try:
+            return {
+                'hostname': socket.gethostname(),
+                'ip_address': socket.gethostbyname(socket.gethostname()),
+                'connections': self.get_active_connections()
+            }
+        except Exception:
+            return {}
+
+    def get_active_connections(self):
+        """Obtient les connexions actives"""
+        try:
+            if platform.system() == 'Windows':
+                netstat = subprocess.check_output(['netstat', '-an'], text=True)
+            else:
+                netstat = subprocess.check_output(['netstat', '-tunlp'], text=True)
+            return netstat.splitlines()
+        except Exception:
+            return []
+
+    def analyze_file_operations(self):
+        """Analyse les opérations sur les fichiers"""
+        try:
+            file_path = Path(self.target_path)
+            return {
+                'permissions': oct(file_path.stat().st_mode)[-3:],
+                'owner': file_path.owner() if hasattr(file_path, 'owner') else 'N/A',
+                'group': file_path.group() if hasattr(file_path, 'group') else 'N/A',
+                'is_symlink': file_path.is_symlink(),
+                'is_hidden': file_path.name.startswith('.')
+            }
+        except Exception:
+            return {}
+
+    def detect_threats(self):
+        """Détecte les menaces"""
+        try:
+            self.report["analysis"]["threats"] = {
+                "suspicious_patterns": self.detect_suspicious_patterns(),
+                "encrypted_content": self.detect_encryption(),
+                "obfuscated_code": self.detect_obfuscation(),
+                "network_indicators": self.detect_network_indicators()
+            }
+        except Exception as e:
+            logger.error(f"Erreur lors de la détection des menaces: {str(e)}")
+            raise
+
+    def detect_suspicious_patterns(self):
+        """Détecte les motifs suspects"""
+        patterns = []
+        try:
+            with open(self.target_path, 'rb') as f:
+                content = f.read().decode('utf-8', errors='ignore')
+            
+            # Recherche de motifs suspects
+            suspicious = [
+                'cmd.exe', 'powershell', 'wget', 'curl', 'download',
+                'http://', 'https://', 'ftp://', 'net user', 'net group'
+            ]
+            
+            for pattern in suspicious:
+                if pattern.lower() in content.lower():
+                    patterns.append(pattern)
+            
+            return patterns
+        except Exception:
+            return []
+
+    def detect_encryption(self):
+        """Détecte le contenu chiffré"""
+        try:
+            entropy = self.calculate_entropy()
+            return {
+                'high_entropy': entropy > 7.0,
+                'entropy_value': entropy
+            }
+        except Exception:
+            return {'high_entropy': False, 'entropy_value': 0}
+
+    def detect_obfuscation(self):
+        """Détecte le code obfusqué"""
+        try:
+            with open(self.target_path, 'rb') as f:
+                content = f.read().decode('utf-8', errors='ignore')
+            
+            indicators = {
+                'base64_encoded': len(self.find_base64()) > 0,
+                'hex_encoded': len(self.find_hex_patterns()) > 0,
+                'suspicious_length': len(content) > 1000000
+            }
+            
+            return indicators
+        except Exception:
+            return {}
+
+    def detect_network_indicators(self):
+        """Détecte les indicateurs réseau"""
+        return {
+            'ip_addresses': self.find_ip_addresses(),
+            'urls': self.find_urls()
+        }
+
+    def generate_recommendations(self):
+        """Génère des recommandations"""
+        try:
+            recommendations = []
+            threats = self.report["analysis"]["threats"]
+            
+            if threats["suspicious_patterns"]:
+                recommendations.append("Fichier contient des motifs suspects - Analyse approfondie recommandée")
+            
+            if threats["encrypted_content"]["high_entropy"]:
+                recommendations.append("Contenu potentiellement chiffré détecté - Vérification de l'intégrité recommandée")
+            
+            if threats["obfuscated_code"]["base64_encoded"] or threats["obfuscated_code"]["hex_encoded"]:
+                recommendations.append("Code potentiellement obfusqué détecté - Analyse statique approfondie recommandée")
+            
+            if threats["network_indicators"]["ip_addresses"] or threats["network_indicators"]["urls"]:
+                recommendations.append("Indicateurs réseau détectés - Analyse du trafic réseau recommandée")
+            
+            self.report["analysis"]["recommendations"] = recommendations
+        except Exception as e:
+            logger.error(f"Erreur lors de la génération des recommandations: {str(e)}")
+            raise
+
+    def calculate_hash(self, file_path, hash_type):
+        """Calcule le hash d'un fichier"""
+        try:
+            hash_func = getattr(hashlib, hash_type)()
+            with open(file_path, 'rb') as f:
+                for chunk in iter(lambda: f.read(4096), b''):
+                    hash_func.update(chunk)
+            return hash_func.hexdigest()
+        except Exception as e:
+            logger.error(f"Erreur lors du calcul du hash {hash_type}: {str(e)}")
+            return None
+
+    def extract_strings(self):
+        """Extrait les chaînes de caractères"""
+        try:
+            with open(self.target_path, 'rb') as f:
+                content = f.read()
+            
+            # Extraction des chaînes ASCII
+            strings = []
+            current_string = ''
+            
+            for byte in content:
+                if 32 <= byte <= 126:  # Caractères ASCII imprimables
+                    current_string += chr(byte)
+                else:
+                    if len(current_string) >= 4:  # Minimum 4 caractères
+                        strings.append(current_string)
+                    current_string = ''
+            
+            if len(current_string) >= 4:
+                strings.append(current_string)
+            
+            return strings
+        except Exception as e:
+            logger.error(f"Erreur lors de l'extraction des chaînes: {str(e)}")
+            return []
+
+    def save_report(self):
+        """Sauvegarde le rapport localement"""
+        try:
+            timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+            report_path = os.path.join(PATHS['output'], f"report_{timestamp}.json")
+            
+            with open(report_path, 'w', encoding='utf-8') as f:
+                json.dump(self.report, f, indent=4, ensure_ascii=False)
+            
+            logger.info(f"Rapport sauvegardé dans {report_path}")
+            return report_path
+        except Exception as e:
+            logger.error(f"Erreur lors de la sauvegarde du rapport: {str(e)}")
+            return None
+
+    def send_to_api(self):
+        """Envoie le rapport à l'API"""
+        try:
+            headers = {
+                'Content-Type': 'application/json',
+                'Accept': 'application/json'
+            }
+            
+            data = json.dumps(self.report).encode('utf-8')
+            req = request.Request(
+                API_CONFIG['endpoint'],
+                data=data,
+                headers=headers,
+                method='POST'
+            )
+            
+            for attempt in range(API_CONFIG['max_retries']):
+                try:
+                    with request.urlopen(req, timeout=API_CONFIG['timeout']) as response:
+                        logger.info(f"Rapport envoyé avec succès à l'API")
+                        return json.loads(response.read().decode())
+                except URLError as e:
+                    if attempt == API_CONFIG['max_retries'] - 1:
+                        raise e
+                    continue
+        except Exception as e:
+            logger.error(f"Erreur lors de l'envoi à l'API: {str(e)}")
+            return None
 
 def main():
-    write_inline_yara()
-    report = []
-    report.append({'tool': 'system_analysis', 'results': collect_system_info()})
-    report.append({'tool': 'boot_analysis', 'results': get_boot_info()})
-    report.append({'tool': 'file_analysis', 'results': analyze_files(SAMPLE_DIR)})
-    report.append({'tool': 'strings_extraction', 'results': [
-        {'file': str(file), 'strings': extract_strings(str(file))}
-        for file in Path(SAMPLE_DIR).glob('*') if file.is_file()
-    ]})
-    report.append({'tool': 'yara_inline_scan', 'results': run_yara_scan(SAMPLE_DIR)})
-    report.append({'tool': 'clamav_scan', 'results': run_clamav_scan(SAMPLE_DIR)})
-    report.append({'tool': 'exiftool_metadata', 'results': run_exiftool_scan(SAMPLE_DIR)})
-    report.append({'tool': 'binwalk_analysis', 'results': run_binwalk_scan(SAMPLE_DIR)})
+    parser = argparse.ArgumentParser(description='Analyse forensique de fichiers')
+    parser.add_argument('target', help='Chemin du fichier à analyser')
+    parser.add_argument('--output', help='Chemin du fichier de sortie', default=None)
+    parser.add_argument('--verbose', action='store_true', help='Affiche plus d\'informations')
+    args = parser.parse_args()
 
-    json_path = save_report_json(report)
-    upload_to_api(json_path)
+    try:
+        # Analyse du fichier
+        analyzer = ForensicAnalyzer(args.target)
+        report = analyzer.analyze_file()
+        
+        # Sauvegarde locale
+        report_path = analyzer.save_report()
+        
+        # Envoi à l'API
+        api_response = analyzer.send_to_api()
+        
+        if args.verbose:
+            print(json.dumps(report, indent=4, ensure_ascii=False))
+            
+    except Exception as e:
+        logger.error(f"Erreur lors de l'analyse: {str(e)}")
+        sys.exit(1)
 
 if __name__ == '__main__':
-    main()
+    main() 
