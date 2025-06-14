@@ -85,7 +85,7 @@ def scan_target(target_url):
         }
 
 def display_results(results):
-    """Affiche les résultats du scan"""
+    """Affiche les résultats du scan de manière formatée"""
     print("\n📊 Résultats du scan :")
     print("=" * 50)
     
@@ -93,21 +93,25 @@ def display_results(results):
         print(f"❌ Erreur : {results['error']}")
         return
     
-    summary = results["scan"]["summary"]
+    if "summary" not in results:
+        print("❌ Aucun résultat disponible")
+        return
+    
+    summary = results["summary"]
+    
     print(f"\n📈 Résumé :")
     print(f"Total des alertes : {summary['total_alerts']}")
     for risk, count in summary['risk_distribution'].items():
         print(f"{risk.capitalize()} : {count}")
     
     print(f"\n🔍 Détail des alertes :")
-    for alert in results["scan"]["alerts"]:
-        print("\n" + "=" * 50)
-        print(f"Risque : {alert['risk']}")
-        print(f"Confiance : {alert['confidence']}")
-        print(f"Description : {alert['description']}")
-        print(f"URL : {alert['url']}")
+    for alert in results["alerts"]:
+        print(f"\n• {alert['name']} ({alert['risk']})")
+        print(f"  URL : {alert['url']}")
+        print(f"  Description : {alert['description']}")
         if 'solution' in alert:
-            print(f"Solution : {alert['solution']}")
+            print(f"  Solution : {alert['solution']}")
+        print("-" * 50)
 
 def main():
     """Fonction principale"""
