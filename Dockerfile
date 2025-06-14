@@ -2,18 +2,25 @@ FROM python:3.9-slim
 
 # Installation des dépendances système
 RUN apt-get update && apt-get install -y \
-    gnupg2 \
-    curl \
-    && curl -fsSL https://radare.org/radare2.asc | gpg --dearmor -o /usr/share/keyrings/radare2.gpg \
-    && echo "deb [signed-by=/usr/share/keyrings/radare2.gpg] https://radare.org/radare2/debian/ bookworm main" | tee /etc/apt/sources.list.d/radare2.list \
-    && apt-get update && apt-get install -y \
+    python3 \
+    python3-pip \
+    python3-dev \
+    build-essential \
+    gcc \
+    make \
     clamav \
     clamav-daemon \
-    radare2 \
+    clamav-freshclam \
+    yara \
     exiftool \
+    sleuthkit \
+    libmagic1 \
+    libyara-dev \
+    git \
+    net-tools \
     && rm -rf /var/lib/apt/lists/*
 
-# Création du répertoire de travail
+# Configuration du répertoire de travail
 WORKDIR /app
 
 # Copie des fichiers nécessaires
@@ -21,15 +28,16 @@ COPY forensic_analyzer.py .
 COPY malware.yar .
 
 # Installation des dépendances Python
-RUN pip install --no-cache-dir \
-    requests>=2.31.0 \
-    python-magic>=0.4.27 \
-    pefile>=2023.2.7 \
-    yara-python>=4.3.1 \
-    python-clamd>=0.4.1 \
-    volatility3>=2.4.1 \
-    r2pipe>=1.7.0 \
-    exiftool>=0.5.5
+RUN pip3 install --no-cache-dir \
+    requests \
+    python-magic \
+    yara-python \
+    git+https://github.com/graingert/python-clamd.git@master \
+    distorm3 \
+    pycryptodome \
+    pefile \
+    capstone \
+    volatility3
 
 # Création d'un utilisateur non-root
 RUN useradd -m -s /bin/bash forensic
