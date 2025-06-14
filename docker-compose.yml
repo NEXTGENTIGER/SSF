@@ -1,37 +1,11 @@
 version: '3.8'
 
 services:
-  forensic-analyzer:
+  forensic_analyzer:
     build: .
+    container_name: forensic_analyzer
     volumes:
-      - /:/host:ro  # Montage en lecture seule du système de fichiers hôte
-      - ./reports:/app/reports  # Répertoire pour les rapports générés
-    environment:
-      - API_ENDPOINT=http://127.0.0.1:5000/api/v1/report/upload_json/
-    extra_hosts:
-      - "host.docker.internal:host-gateway"  # Pour accéder à la machine hôte
-    network_mode: "host"  # Pour accéder aux services de la machine hôte
-    privileged: true  # Nécessaire pour certaines analyses système
-    command: >
-      bash -c "
-        mkdir -p /app/reports &&
-        if [ -n '$TARGET_PATH' ]; then
-          python forensic_analyzer.py /host$TARGET_PATH --host --output /app/reports
-        else
-          echo 'Veuillez spécifier le chemin à analyser avec la variable TARGET_PATH'
-          exit 1
-        fi
-      "
-
-  # Service API optionnel (à décommenter si nécessaire)
-  # api:
-  #   image: python:3.9-slim
-  #   ports:
-  #     - "5000:5000"
-  #   volumes:
-  #     - ./api:/app
-  #   working_dir: /app
-  #   command: python api.py
-  #   environment:
-  #     - FLASK_APP=api.py
-  #     - FLASK_ENV=development 
+      - ./samples:/samples
+    restart: unless-stopped
+    tty: true
+    stdin_open: true
