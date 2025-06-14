@@ -17,63 +17,72 @@ API_CONFIG = {
 
 # Configuration ZAP
 ZAP_CONFIG = {
-    'host': os.getenv('ZAP_HOST', 'zap'),
+    'host': os.getenv('ZAP_HOST', 'localhost'),
     'port': os.getenv('ZAP_PORT', '8080'),
-    'api_key': os.getenv('ZAP_API_KEY', '')
+    'api_key': os.getenv('ZAP_API_KEY', 'changeme')
 }
 
 def scan_target(target_url):
-    """Effectue un scan ZAP sur l'URL cible"""
-    results = {
-        "timestamp": datetime.datetime.now().isoformat(),
-        "target": target_url,
-        "scan": {}
-    }
-    
+    """Exécute un scan ZAP sur l'URL cible"""
     try:
-        # Initialisation de ZAP
-        zap = ZAPv2(
-            apikey=ZAP_CONFIG['api_key'],
-            proxies={
-                "http": f"http://{ZAP_CONFIG['host']}:{ZAP_CONFIG['port']}",
-                "https": f"http://{ZAP_CONFIG['host']}:{ZAP_CONFIG['port']}"
-            }
-        )
+        # Connexion à ZAP
+        zap = ZAPv2(apikey=ZAP_CONFIG['api_key'],
+                    proxies={'http': f'http://{ZAP_CONFIG["host"]}:{ZAP_CONFIG["port"]}',
+                            'https': f'http://{ZAP_CONFIG["host"]}:{ZAP_CONFIG["port"]}'})
         
-        # Vérification de l'accessibilité
         print("⏳ Vérification de l'accessibilité de la cible...")
-        zap.urlopen(target_url)
-        time.sleep(5)
+        # Vérifier si la cible est accessible
+        try:
+            zap.urlopen(target_url)
+        except Exception as e:
+            print(f"⚠️ Attention : Impossible d'accéder à la cible directement : {str(e)}")
+            print("ℹ️ Le scan continuera via le proxy ZAP...")
         
-        # Lancement du scan actif
         print("🚀 Lancement du scan actif...")
+        # Lancer le scan actif
         scan_id = zap.ascan.scan(target_url)
         
-        # Suivi de la progression
-        while int(zap.ascan.status(scan_id)) < 100:
-            progress = zap.ascan.status(scan_id)
-            print(f"🔄 Progression du scan : {progress}%")
+        # Suivre la progression
+        while True:
+            progress = int(zap.ascan.status(scan_id))
+            print(f"⏳ Progression du scan : {progress}%")
+            if progress >= 100:
+                break
             time.sleep(5)
         
-        # Récupération des résultats
         print("✅ Scan terminé. Récupération des résultats...")
-        alerts = zap.core.alerts(baseurl=target_url)
+        # Récupérer les alertes
+        alerts = zap.core.alerts()
         
-        # Ajout des résultats au rapport
-        results["scan"] = {
-            "alerts": alerts,
-            "summary": {
-                "total_alerts": len(alerts),
-                "high_alerts": len([a for a in alerts if a['risk'] == 'High']),
-                "medium_alerts": len([a for a in alerts if a['risk'] == 'Medium']),
-                "low_alerts": len([a for a in alerts if a['risk'] == 'Low']),
-                "info_alerts": len([a for a in alerts if a['risk'] == 'Informational'])
+        # Récupérer les statistiques
+        stats = {
+            'High': 0,
+            'Medium': 0,
+            'Low': 0,
+            'Informational': 0
+        }
+        
+        for alert in alerts:
+            risk = alert.get('risk', 'Informational')
+            stats[risk] = stats.get(risk, 0) + 1
+        
+        return {
+            'timestamp': datetime.now().isoformat(),
+            'target': target_url,
+            'alerts': alerts,
+            'summary': {
+                'total_alerts': len(alerts),
+                'risk_distribution': stats
             }
         }
         
-        return results
     except Exception as e:
-        return {"error": str(e)}
+        print(f"❌ Erreur lors du scan : {str(e)}")
+        return {
+            'error': str(e),
+            'timestamp': datetime.now().isoformat(),
+            'target': target_url
+        }
 
 def display_results(results):
     """Affiche les résultats du scan"""
@@ -87,10 +96,8 @@ def display_results(results):
     summary = results["scan"]["summary"]
     print(f"\n📈 Résumé :")
     print(f"Total des alertes : {summary['total_alerts']}")
-    print(f"Alertes critiques : {summary['high_alerts']}")
-    print(f"Alertes moyennes : {summary['medium_alerts']}")
-    print(f"Alertes faibles : {summary['low_alerts']}")
-    print(f"Informations : {summary['info_alerts']}")
+    for risk, count in summary['risk_distribution'].items():
+        print(f"{risk.capitalize()} : {count}")
     
     print(f"\n🔍 Détail des alertes :")
     for alert in results["scan"]["alerts"]:
