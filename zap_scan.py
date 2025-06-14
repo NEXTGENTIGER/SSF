@@ -110,50 +110,45 @@ def display_results(results):
             print(f"Solution : {alert['solution']}")
 
 def main():
+    """Fonction principale"""
     if len(sys.argv) < 2:
-        print("❌ Usage : python3 zap_scan.py <target_url> [--verbose]")
+        print("❌ Usage: python3 zap_scan.py <url> [--verbose]")
         sys.exit(1)
-
+    
     target = sys.argv[1]
     verbose = "--verbose" in sys.argv
     
-    print(f"▶️ Début du scan ZAP sur la cible : {target}")
+    print(f"▶ Début du scan ZAP sur la cible : {target}")
     
     # Exécution du scan
     results = scan_target(target)
     
-    # Sauvegarde locale
-    safe_target = target.replace("https://", "").replace("http://", "").replace("/", "_")
-    timestamp = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
+    # Génération du nom de fichier
+    safe_target = target.replace("://", "_").replace("/", "_").replace(".", "_")
+    timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
     filename = f"zap-result-{safe_target}-{timestamp}.json"
     
-    with open(filename, "w") as f:
-        json.dump(results, f, indent=2)
-    
+    # Sauvegarde des résultats
+    with open(filename, 'w', encoding='utf-8') as f:
+        json.dump(results, f, indent=4, ensure_ascii=False)
     print(f"💾 Rapport sauvegardé dans : {filename}")
     
     # Affichage des résultats
     display_results(results)
     
     # Envoi à l'API
-    print("\n⏳ Envoi des résultats à l'API...")
+    print("⏳ Envoi des résultats à l'API...")
     try:
-        headers = {
-            'Content-Type': 'application/json',
-            'Accept': 'application/json'
-        }
-        
         response = requests.post(
             API_CONFIG['endpoint'],
             json=results,
-            headers=headers,
             timeout=API_CONFIG['timeout']
         )
         response.raise_for_status()
         print("✅ Résultats envoyés avec succès à l'API")
     except Exception as e:
         print(f"❌ Erreur lors de l'envoi à l'API : {str(e)}")
-        print("ℹ️ Les résultats sont disponibles localement dans le fichier JSON")
+        print("ℹ Les résultats sont disponibles localement dans le fichier JSON")
 
 if __name__ == "__main__":
     main() 
