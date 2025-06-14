@@ -3,10 +3,10 @@
 
 import os
 import sys
-import time
-import datetime
 import json
+import time
 import requests
+from datetime import datetime
 from zapv2 import ZAPv2
 
 # Configuration API
