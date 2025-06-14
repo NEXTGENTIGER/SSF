@@ -1,4 +1,3 @@
-# Dockerfile minimal optimisé pour forensic_analyzer.py avec YARA intégré inline
 FROM python:3.11-slim
 
 # Installation minimale des outils requis
@@ -14,7 +13,7 @@ RUN apt-get update && apt-get install -y \
  && rm -rf /var/lib/apt/lists/*
 
 # Dépendances Python nécessaires
-RUN pip install --no-cache-dir python-magic-bin requests
+RUN pip install --no-cache-dir python-magic requests
 
 # Préparer environnement d'analyse
 RUN mkdir /samples
