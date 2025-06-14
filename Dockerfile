@@ -1,7 +1,7 @@
-# Dockerfile
+# Dockerfile pour forensic_analyzer.py avec YARA intégré inline
 FROM python:3.11-slim
 
-# Installer les dépendances système
+# Installation des outils système nécessaires
 RUN apt-get update && apt-get install -y \
     yara \
     clamav \
@@ -15,17 +15,17 @@ RUN apt-get update && apt-get install -y \
     procps \
     util-linux \
     systemd \
- && apt-get clean
+ && rm -rf /var/lib/apt/lists/*
 
-# Installer les dépendances Python
+# Installation des bibliothèques Python nécessaires
 RUN pip install --no-cache-dir python-magic-bin requests
 
-# Créer dossier d'analyse
+# Dossier des fichiers à analyser
 RUN mkdir /samples
 
-# Copier le script et les règles yara
+# Copie du script principal uniquement (YARA est intégré inline)
 COPY forensic_analyzer.py /app/forensic_analyzer.py
-COPY yara_rules.yar /app/yara_rules.yar
 WORKDIR /app
 
+# Commande par défaut
 CMD ["python", "forensic_analyzer.py"]
