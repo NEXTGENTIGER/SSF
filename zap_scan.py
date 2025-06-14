@@ -75,12 +75,40 @@ def scan_target(target_url):
     except Exception as e:
         return {"error": str(e)}
 
+def display_results(results):
+    """Affiche les résultats du scan"""
+    print("\n📊 Résultats du scan :")
+    print("=" * 50)
+    
+    if "error" in results:
+        print(f"❌ Erreur : {results['error']}")
+        return
+    
+    summary = results["scan"]["summary"]
+    print(f"\n📈 Résumé :")
+    print(f"Total des alertes : {summary['total_alerts']}")
+    print(f"Alertes critiques : {summary['high_alerts']}")
+    print(f"Alertes moyennes : {summary['medium_alerts']}")
+    print(f"Alertes faibles : {summary['low_alerts']}")
+    print(f"Informations : {summary['info_alerts']}")
+    
+    print(f"\n🔍 Détail des alertes :")
+    for alert in results["scan"]["alerts"]:
+        print("\n" + "=" * 50)
+        print(f"Risque : {alert['risk']}")
+        print(f"Confiance : {alert['confidence']}")
+        print(f"Description : {alert['description']}")
+        print(f"URL : {alert['url']}")
+        if 'solution' in alert:
+            print(f"Solution : {alert['solution']}")
+
 def main():
     if len(sys.argv) < 2:
-        print("❌ Usage : python3 zap_scan.py <target_url>")
+        print("❌ Usage : python3 zap_scan.py <target_url> [--verbose]")
         sys.exit(1)
 
     target = sys.argv[1]
+    verbose = "--verbose" in sys.argv
     
     print(f"▶️ Début du scan ZAP sur la cible : {target}")
     
@@ -97,8 +125,11 @@ def main():
     
     print(f"💾 Rapport sauvegardé dans : {filename}")
     
+    # Affichage des résultats
+    display_results(results)
+    
     # Envoi à l'API
-    print("⏳ Envoi des résultats à l'API...")
+    print("\n⏳ Envoi des résultats à l'API...")
     try:
         headers = {
             'Content-Type': 'application/json',
@@ -115,6 +146,7 @@ def main():
         print("✅ Résultats envoyés avec succès à l'API")
     except Exception as e:
         print(f"❌ Erreur lors de l'envoi à l'API : {str(e)}")
+        print("ℹ️ Les résultats sont disponibles localement dans le fichier JSON")
 
 if __name__ == "__main__":
     main() 
