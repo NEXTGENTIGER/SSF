@@ -2,6 +2,11 @@ FROM python:3.9-slim
 
 # Installation des dépendances système
 RUN apt-get update && apt-get install -y \
+    gnupg2 \
+    curl \
+    && curl -fsSL https://radare.org/radare2.asc | gpg --dearmor -o /usr/share/keyrings/radare2.gpg \
+    && echo "deb [signed-by=/usr/share/keyrings/radare2.gpg] https://radare.org/radare2/debian/ bookworm main" | tee /etc/apt/sources.list.d/radare2.list \
+    && apt-get update && apt-get install -y \
     clamav \
     clamav-daemon \
     radare2 \
