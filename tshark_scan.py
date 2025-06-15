@@ -16,7 +16,7 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 class TsharkCapture:
-    def __init__(self, api_url: str = "http://localhost:8000/api/scan-results/"):
+    def __init__(self, api_url: str = "http://127.0.0.1:5000/api/v1/report/upload_json/"):
         """Initialise le capteur Tshark avec l'URL de l'API."""
         self.api_url = api_url
         self.results_dir = "results"
